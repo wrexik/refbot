@@ -1,0 +1,10 @@
+{
+  "url": "https://rarecloud.io/rewards/?ref=298dToit",
+  "timeout": 8,
+  "retries": 100,
+  "verify_ssl": true,
+  "user_agent": "RefBot/1.0 (+https://example.com)",
+  "cookies": {
+    "cookie_consent": "accepted"
+  }
+}
