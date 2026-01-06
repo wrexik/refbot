@@ -1,80 +1,177 @@
+"""
+Proxy checker - validates HTTP and HTTPS support for proxies
+Returns detailed validation results with speed metrics
+"""
 
 import requests
-from concurrent.futures import ThreadPoolExecutor
-import os
-import sys
+import time
+from typing import Dict, Optional
 
-def clear():
-    os.system("cls" if os.name == "nt" else "clear")
 
-def check_internet_connection():
-    try:
-        requests.get("https://www.google.com", timeout=5)
-        return True
-    except requests.ConnectionError:
-        return False
+HTTP_TEST_URL = "http://httpbin.org/ip"
+HTTPS_TEST_URL = "https://httpbin.org/ip"
 
-def check_proxy(proxy, save_file):
-    proxies = {
-        'http': f'http://{proxy}',
-        'https': f'http://{proxy}'
-    }
+
+def validate_http_proxy(ip: str, port: int, timeout: int = 8) -> Dict:
+    """
+    Validate if proxy supports HTTP requests
+    
+    Args:
+        ip: Proxy IP address
+        port: Proxy port
+        timeout: Request timeout in seconds
+    
+    Returns:
+        Dictionary with keys:
+        - success: bool - Whether validation passed
+        - speed: float - Response time in seconds (0 if failed)
+        - location: str - Approximate location from response
+        - error: str - Error message if failed
+    """
+    proxy_addr = f"http://{ip}:{port}"
+    proxies = {"http": proxy_addr, "https": proxy_addr}
     
     try:
-        response = requests.get('http://httpbin.org/ip', proxies=proxies, timeout=5)
-        if response.status_code in [200, 202, 500, 502, 503, 504]:
-            detect_location(proxy, save_file)
-            return True
-    except requests.exceptions.RequestException:
-        pass
-
-    print(f" \033[1;37m[\033[1;31m★\033[1;37m] \033[1;37m{proxy} \033[1;31m× \033[1;31mDead")
-    return False
-
-def detect_location(proxy, save_file):
-    ip_address = proxy.split(':')[0]
-    try:
-        response = requests.get(f"http://ip-api.com/json/{ip_address}")
+        start = time.perf_counter()
+        response = requests.get(
+            HTTP_TEST_URL,
+            proxies=proxies,
+            timeout=timeout,
+            verify=False,
+        )
+        elapsed = time.perf_counter() - start
+        
         if response.status_code == 200:
-            data = response.json()
-            if data["status"] == "success":
-                print(f"\033[1;37m{proxy} \033[1;31m√ \033[1;37m{data['country']}/{data['city']} \033[1;31m√ \033[1;32mLive")
-                with open(save_file, 'a') as f:
-                    f.write(proxy + '\n')
-            else:
-                print(f"\033[1;37m[\033[1;31m+\033[1;37m] \033[1;31mFailed to detect location for proxy.")
-    except requests.exceptions.RequestException:
-        print(f"\033[1;37m[\033[1;31m+\033[1;37m] \033[1;31mFailed to detect location for proxy.")
-
-def main():
-    clear()
-    if not check_internet_connection():
-        print("\n\033[1;31mNo internet connection!")
-        sys.exit(1)
+            try:
+                data = response.json()
+                location = data.get("origin", "Unknown")
+            except:
+                location = "Unknown"
+            
+            return {
+                "success": True,
+                "speed": elapsed,
+                "location": location,
+                "error": None,
+            }
+        else:
+            return {
+                "success": False,
+                "speed": 0,
+                "location": None,
+                "error": f"HTTP {response.status_code}",
+            }
     
-    proxy_file = "Proxies.txt"
-    if not os.path.exists(proxy_file):
-        proxy_file = input("\033[1;32mEnter Proxy File: \033[1;33m")
+    except requests.Timeout:
+        return {
+            "success": False,
+            "speed": 0,
+            "location": None,
+            "error": "Timeout",
+        }
+    except requests.ConnectionError:
+        return {
+            "success": False,
+            "speed": 0,
+            "location": None,
+            "error": "Connection failed",
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "speed": 0,
+            "location": None,
+            "error": str(exc)[:50],
+        }
+
+
+def validate_https_proxy(ip: str, port: int, timeout: int = 8) -> Dict:
+    """
+    Validate if proxy supports HTTPS requests
+    
+    Args:
+        ip: Proxy IP address
+        port: Proxy port
+        timeout: Request timeout in seconds
+    
+    Returns:
+        Dictionary with keys:
+        - success: bool - Whether validation passed
+        - speed: float - Response time in seconds (0 if failed)
+        - location: str - Approximate location from response
+        - error: str - Error message if failed
+    """
+    proxy_addr = f"http://{ip}:{port}"
+    proxies = {"http": proxy_addr, "https": proxy_addr}
     
     try:
-        with open(proxy_file, 'r') as file:
-            proxy_list = file.read().splitlines()
-    except FileNotFoundError:
-        print("\033[1;31mProxy file not found!")
-        sys.exit(1)
+        start = time.perf_counter()
+        response = requests.get(
+            HTTPS_TEST_URL,
+            proxies=proxies,
+            timeout=timeout,
+            verify=False,
+        )
+        elapsed = time.perf_counter() - start
+        
+        if response.status_code == 200:
+            try:
+                data = response.json()
+                location = data.get("origin", "Unknown")
+            except:
+                location = "Unknown"
+            
+            return {
+                "success": True,
+                "speed": elapsed,
+                "location": location,
+                "error": None,
+            }
+        else:
+            return {
+                "success": False,
+                "speed": 0,
+                "location": None,
+                "error": f"HTTP {response.status_code}",
+            }
     
-    proxy_count = len(proxy_list)
-    save_file = "working_proxies.txt"
-    print(f" \033[1;31mTotal: \033[1;37m{proxy_count} \033[1;31mProxies in File")
+    except requests.Timeout:
+        return {
+            "success": False,
+            "speed": 0,
+            "location": None,
+            "error": "Timeout",
+        }
+    except requests.ConnectionError:
+        return {
+            "success": False,
+            "speed": 0,
+            "location": None,
+            "error": "Connection failed",
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "speed": 0,
+            "location": None,
+            "error": str(exc)[:50],
+        }
 
-    num_workers = 200
-    with ThreadPoolExecutor(max_workers=num_workers) as executor:
-        executor.map(lambda p: check_proxy(p, save_file), proxy_list)
-
-    live_count = len(open(save_file).readlines()) if os.path.exists(save_file) else 0
-    print(f" \033[1;31mProxy Checking Complete - Saved to \033[1;37m{save_file} \033[1;31mwith \033[1;37m{live_count} \033[1;31mLive Proxies")
-    input(" Press Enter to exit")
-    sys.exit()
 
 if __name__ == "__main__":
-    main()
+    print("Proxy Checker - Testing with sample proxies\n")
+    
+    # Test with a known working proxy (example)
+    test_proxies = [
+        ("1.1.1.1", 8080),
+        ("8.8.8.8", 8080),
+    ]
+    
+    for ip, port in test_proxies:
+        print(f"Testing {ip}:{port}")
+        
+        http_result = validate_http_proxy(ip, port)
+        print(f"  HTTP: {http_result}")
+        
+        https_result = validate_https_proxy(ip, port)
+        print(f"  HTTPS: {https_result}\n")
