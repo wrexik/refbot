@@ -1,160 +1,309 @@
 # RefBot Quick Start Guide
 
-Get RefBot running in 2 minutes.
-
 ## Installation
 
+### 1. Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-## Run
-
+### 2. Install Playwright Browsers
 ```bash
-python dashboard.py
+playwright install chromium
 ```
 
-## That's It!
+## Running the System
 
-The dashboard will:
-1. Start scraping proxies from 38 sources
-2. Validate them with 200 concurrent HTTP/HTTPS workers
-3. Display a 7-panel Rich dashboard
-4. Auto-save state every 10 seconds
-5. Update every 1 second
-
-## Dashboard Layout
-
+### Option 1: Dashboard (Recommended)
+```bash
+python main.py
 ```
-┌─────────────────────────────────┐
-│ Header (Time, Uptime, Mode)     │
-├──────────────┬──────────────────┤
-│ Stats Panel  │  Top Proxies     │
-├──────────────┤  Loading Status  │
-│ Config Panel │  Help & Shortcuts│
-├──────────────┤──────────────────┤
-│ Protocol Bar │  (7 panels total)│
-└──────────────┴──────────────────┘
-         Event Log (20 lines)
+Then navigate with arrow keys and press Enter to control plugins.
+
+### Option 2: CLI
+```bash
+# List all plugins
+python -m cli.cli_commands plugin list
+
+# Start a plugin
+python -m cli.cli_commands plugin start registration_plugin
+
+# Show metrics
+python -m cli.cli_commands metrics show
+
+# Start API server
+python -m cli.cli_commands api start --port 8000
 ```
 
-## Key Panels
+### Option 3: REST API
+```bash
+# Start the server
+python -m cli.cli_commands api start --port 8000
 
-| Panel | Shows |
-|-------|-------|
-| **Stats** | Scraped, Validated, Working, Failed, Avg Speed |
-| **Config** | Current settings from config.json |
-| **Protocols** | HTTP/HTTPS/BOTH distribution |
-| **Top Proxies** | 8 fastest working proxies |
-| **Loading** | Page loader status & success/fail counts |
-| **Help** | Keyboard shortcuts |
-| **Log** | Color-coded activity (20 lines) |
+# Then use curl or requests to control
+curl http://localhost:8000/api/plugins
+curl -X POST http://localhost:8000/api/plugins/registration_plugin/start
+```
 
-## Common Tasks
-
-### Get Proxies After Dashboard Starts
-
-Wait ~5 minutes, then in another terminal:
-
+### Option 4: Python Script
 ```python
-from main import get_proxies
-proxies = get_proxies("HTTPS")  # or "HTTP", "ANY"
-print(f"Found {len(proxies)} working proxies")
-for p in proxies[:5]:
-    print(f"  {p.ip}:{p.port} - {p.response_time:.2f}s")
+from plugins.plugin_manager import PluginManager
+
+# Create and load plugins
+pm = PluginManager("plugins")
+pm.load_all_plugins()
+
+# Start all plugins
+pm.start_all_plugins()
+
+# Let them run for a while
+import time
+time.sleep(300)
+
+# Stop and cleanup
+pm.stop_all_plugins()
 ```
 
-### Change Configuration
+## Configuration
 
-Edit `config.json`:
-
+### Main Config (config.json)
 ```json
 {
-  "scraper_interval_minutes": 20,
-  "http_workers": 200,
-  "https_workers": 200,
-  "timeout": 8
+  "mode": "dashboard",
+  "plugins_dir": "plugins",
+  "metrics_file": "metrics.csv",
+  "api": {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "enable": true
+  }
 }
 ```
 
-Then restart dashboard: `python dashboard.py`
-
-### Export Proxies
-
-While dashboard running, press `E` key to export.
-
-Or in Python:
-
-```python
-from main import export_proxies
-count = export_proxies("my_proxies.txt")
-print(f"Exported {count} proxies")
+### Registration Plugin Config
+Edit `plugins/registration_plugin/plugin_config.json`:
+```json
+{
+  "url": "https://example.com/register",
+  "first_name_selector": "input[name='firstName']",
+  "email_selector": "input[name='email']",
+  "submit_selector": "button[type='submit']",
+  "headless": false,
+  "batch_size": 5,
+  "delay_between_submissions_ms": 2000,
+  "proxy_url": "http://proxy.example.com:8080"
+}
 ```
 
-### Get Statistics
+## Dashboard Controls
 
-```python
-from main import get_stats
-stats = get_stats()
-print(f"Working: {stats['working_count']}")
-print(f"Testing: {stats['testing_count']}")
-print(f"Failed: {stats['failed_count']}")
-print(f"Avg Speed: {stats['average_speed']:.2f}s")
+Navigate with **arrow keys**:
+- **UP/DOWN** - Select plugin
+- **ENTER** - Start/Resume
+- **SPACE** - Pause
+- **DELETE/BACKSPACE** - Stop
+- **Q/ESC** - Quit
+
+View in dashboard:
+- Plugin status (running, paused, stopped, error)
+- Current metrics (requests, success rate, response time)
+- Active proxies and their health
+- Live logs from all plugins
+
+## Monitoring
+
+### View Metrics
+```bash
+python -m cli.cli_commands metrics show --hours 24
 ```
 
-## Dashboard Features
+### Export Metrics
+```bash
+# CSV export
+python -m cli.cli_commands metrics export --format csv --output results.csv
 
-| Feature | How to Use |
-|---------|-----------|
-| **Auto-Scrape** | Starts automatically, runs every 20 minutes |
-| **Auto-Validate** | 400 concurrent workers (200 HTTP, 200 HTTPS) |
-| **Auto-Save** | State saved to JSON every 10 seconds |
-| **Live Stats** | Refreshes every 1 second |
-| **Color Logs** | Green=success, Yellow=info, Red=errors |
-| **Top Proxies** | Shows 8 fastest with response times |
-| **Metrics Export** | CSV export to metrics.csv |
+# JSON export
+python -m cli.cli_commands metrics export --format json --output results.json
+```
+
+### Check Proxy Health
+```bash
+python -m cli.cli_commands proxies health
+python -m cli.cli_commands proxies score --top 20
+```
+
+### View API Documentation
+Start the API server and open: http://localhost:8000/docs
+
+## Creating Custom Plugins
+
+### Step 1: Create Plugin Directory
+```bash
+mkdir plugins/my_plugin
+```
+
+### Step 2: Create Plugin Class
+File: `plugins/my_plugin/my_plugin.py`
+```python
+from plugins.base_plugin import BasePlugin
+
+class MyPlugin(BasePlugin):
+    def execute(self):
+        # Your plugin logic here
+        return {
+            "response_time_ms": 100,
+            "items_processed": 10
+        }
+```
+
+### Step 3: Create Configuration
+File: `plugins/my_plugin/plugin_config.json`
+```json
+{
+  "enabled": true,
+  "name": "My Plugin",
+  "description": "Plugin description",
+  "class": "my_plugin.MyPlugin",
+  "version": "1.0.0"
+}
+```
+
+### Step 4: Load and Run
+```python
+from plugins.plugin_manager import PluginManager
+
+pm = PluginManager()
+pm.load_plugin("my_plugin")
+pm.start_plugin("my_plugin")
+```
 
 ## Troubleshooting
 
-### Dashboard shows "No working proxies"
-- **Solution**: Wait 5 minutes for first scrape cycle
-- Check that your internet is working
-- Verify proxy sources are accessible
+### Playwright Not Found
+```bash
+pip install playwright
+playwright install chromium
+```
 
-### Validation is slow
-- **Solution**: Reduce worker count in config.json
-- Increase timeout value
-- Check network connectivity
+### Port Already in Use
+```bash
+# Use different port
+python -m cli.cli_commands api start --port 8001
+```
 
-### Terminal display is messed up
-- **Solution**: Make terminal wider (100+ columns)
-- Use Windows Terminal or modern terminal app
-- Try in different terminal
+### Plugin Not Loading
+- Check plugin_config.json exists in plugin directory
+- Verify "class" field points to correct class name
+- Check plugin_config.json is valid JSON
+- Look at logs for detailed error messages
 
-## File Locations
+### Proxy Connection Issues
+- Verify proxy URL format: `http://host:port`
+- Test proxy separately: `curl -x http://proxy:port http://example.com`
+- Check proxy is accessible from your network
+- Add timeout configuration in plugin config
 
-| File | Purpose |
-|------|---------|
-| `working_proxies.json` | Persistent proxy database |
-| `metrics.csv` | Validation statistics |
-| `dashboard_state.json` | Dashboard backup |
-| `config.json` | Configuration (editable) |
+### Low Success Rate
+- Increase delay between submissions
+- Reduce batch size
+- Add proxy rotation
+- Check target website restrictions
+- Verify form selectors are correct
 
-## Performance
+## Performance Tuning
 
-- **First Scrape**: 5 minutes to gather 50+ proxies
-- **Validation**: 1-2 seconds per proxy
-- **Dashboard Update**: 1 second
-- **Memory**: 2-5 MB for 100 proxies
+### For High-Volume Registrations
+```json
+{
+  "batch_size": 20,
+  "delay_between_submissions_ms": 500,
+  "headless": true
+}
+```
+
+### For Reliable Registrations
+```json
+{
+  "batch_size": 1,
+  "delay_between_submissions_ms": 3000,
+  "headless": false
+}
+```
+
+### Proxy Scoring
+The system automatically scores proxies based on:
+- Success rate (40% weight)
+- Response time (30% weight)
+- Reliability (30% weight)
+
+Best proxies are selected automatically via `WEIGHTED` load balancing strategy.
+
+## Environment Variables
+
+```bash
+# API Configuration
+export REFBOT_API_URL="http://localhost:8000"
+export REFBOT_API_TOKEN="your-token"
+
+# Logging
+export REFBOT_LOG_LEVEL="INFO"
+
+# Database
+export REFBOT_DB_PATH="./data/metrics.db"
+```
+
+## API Endpoints
+
+### Health & Status
+- `GET /api/health` - System health
+- `GET /api/plugins` - List plugins
+
+### Plugin Control
+- `POST /api/plugins/{name}/start` - Start plugin
+- `POST /api/plugins/{name}/stop` - Stop plugin
+
+### Metrics
+- `GET /api/metrics` - Current metrics
+- `GET /api/metrics/export?format=csv|json` - Export
+
+### Proxies
+- `GET /api/proxies?sort=score|response_time|success_rate` - Proxy list
+
+### Documentation
+- `GET /docs` - Swagger UI
+- `GET /redoc` - ReDoc documentation
+
+## Support
+
+For issues and feature requests:
+1. Check ARCHITECTURE.md for detailed component information
+2. Review logs in dashboard or CLI output
+3. Test API endpoints at http://localhost:8000/docs
+4. Create plugin-specific issue with reproduction steps
 
 ## Next Steps
 
-1. ✅ Run `python dashboard.py`
-2. ✅ Wait for proxies to validate (~5 min)
-3. ✅ Export with E key or `export_proxies()`
-4. ✅ Use in your code with `get_proxies()`
-5. ✅ Check metrics in `metrics.csv`
+1. **Customize Registration Plugin**
+   - Update selectors for your target website
+   - Configure proxy and batch settings
+   - Test with small batch first
 
-## For More Details
+2. **Create Custom Plugin**
+   - Extend BasePlugin class
+   - Implement execute() method
+   - Add plugin_config.json
 
-See [README.md](README.md) for complete documentation.
+3. **Set Up Monitoring**
+   - Export metrics regularly
+   - Monitor success rates
+   - Track proxy health
+
+4. **Production Deployment**
+   - Use systemd for auto-start
+   - Configure log rotation
+   - Set up metrics backup
+   - Enable API authentication
+
+---
+**Version**: 1.0.0
+**Last Updated**: 2024

@@ -8,7 +8,7 @@
   "scraper_interval_minutes": 20,
   "http_workers": 200,
   "https_workers": 200,
-  "log_buffer_lines": 15,
+  "log_buffer_lines": 8,
   "save_state_interval_seconds": 10,
   "proxy_revalidate_hours": 1,
   "dashboard_refresh_rate": 1

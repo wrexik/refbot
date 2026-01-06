@@ -21,6 +21,8 @@ from proxy_manager import ProxyManager
 from persistence import PersistenceManager, MetricsExporter
 from worker_threads import WorkerThreads
 from playwright.sync_api import sync_playwright, Error as PlaywrightError, TimeoutError as PlaywrightTimeout
+from plugins.plugin_manager import PluginManager
+from plugins.base_plugin import PluginStatus
 
 try:
     from prompt_toolkit.formatted_text import HTML
@@ -45,6 +47,17 @@ class AdvancedDashboard:
         self.proxy_manager = ProxyManager()
         self.persistence = PersistenceManager()
         self.metrics_exporter = MetricsExporter()
+        self.plugin_manager = PluginManager(self.config.get("plugins_dir", "plugins"))
+        self.plugin_manager.load_all_plugins()
+        self.plugin_manager.register_metric_callback(self._on_plugin_metric)
+        # Share proxy manager with plugins that support it
+        for plugin in self.plugin_manager.plugins.values():
+            try:
+                plugin.proxy_manager = self.proxy_manager
+            except Exception:
+                pass
+        self.plugin_names = sorted(self.plugin_manager.plugins.keys())
+        self.selected_plugin_index = 0
         
         # Worker threads
         self.workers: Optional[WorkerThreads] = None
@@ -95,6 +108,17 @@ class AdvancedDashboard:
         
         self.log_buffer.append((timestamp, level, colored_msg))
         self.persistence.add_log_message(level, message)
+
+    def _on_plugin_metric(self, plugin_name: str, metrics: dict):
+        """Receive plugin metric callbacks and log lightweight summary"""
+        summary = metrics or {}
+        total = summary.get("requests_total", 0)
+        success = summary.get("requests_success", 0)
+        failed = summary.get("requests_failed", 0)
+        self._log(
+            "INFO",
+            f"Plugin {plugin_name}: total={total} ✓{success} ✗{failed}"
+        )
     
     def _make_header(self) -> Panel:
         """Create header panel with title and time"""
@@ -202,6 +226,44 @@ class AdvancedDashboard:
             border_style="cyan",
             padding=(1, 1)
         )
+
+    def _make_plugins_panel(self) -> Panel:
+        """Create plugin status panel with selection highlight"""
+        if not self.plugin_names:
+            return Panel(
+                Text("No plugins discovered", style="dim yellow"),
+                title="[bold cyan]🧩 Plugins[/bold cyan]",
+                border_style="cyan",
+                padding=(1, 1)
+            )
+
+        table = Table(show_header=True, box=None, padding=(0, 1))
+        table.add_column("Plugin", style="cyan", width=18)
+        table.add_column("Status", style="magenta", width=10)
+        table.add_column("Req", style="green", width=6)
+        table.add_column("Err", style="red", width=6)
+
+        for idx, name in enumerate(self.plugin_names):
+            plugin = self.plugin_manager.plugins.get(name)
+            status = plugin.status.value if plugin else "unknown"
+            metrics = plugin.get_metrics() if plugin else None
+            req_total = metrics.requests_total if metrics else 0
+            req_failed = metrics.requests_failed if metrics else 0
+            highlight = "reverse" if idx == self.selected_plugin_index else ""
+
+            table.add_row(
+                Text(name, style=f"cyan {highlight}"),
+                Text(status, style=f"magenta {highlight}"),
+                Text(str(req_total), style=f"green {highlight}"),
+                Text(str(req_failed), style=f"red {highlight}")
+            )
+
+        return Panel(
+            table,
+            title="[bold cyan]🧩 Plugins[/bold cyan]",
+            border_style="cyan",
+            padding=(1, 1)
+        )
     
     def _make_log_panel(self) -> Panel:
         """Create log display panel"""
@@ -250,15 +312,15 @@ class AdvancedDashboard:
         layout["body"]["left"]["config"].update(self._make_config_panel())
         layout["body"]["left"]["protocols"].update(self._make_protocol_stats_panel())
         
-        # Right side: proxies, loading, help
+        # Right side: plugins, proxies, help
         layout["body"]["right"].split_column(
-            Layout(name="proxies", size=10),
-            Layout(name="loading", size=6),
-            Layout(name="help", size=5)
+            Layout(name="plugins", size=12),
+            Layout(name="proxies", size=12),
+            Layout(name="help", size=7)
         )
-        
+
+        layout["body"]["right"]["plugins"].update(self._make_plugins_panel())
         layout["body"]["right"]["proxies"].update(self._make_proxies_panel())
-        layout["body"]["right"]["loading"].update(self._make_loading_panel())
         layout["body"]["right"]["help"].update(self._make_help_panel())
         
         return layout
@@ -293,31 +355,15 @@ class AdvancedDashboard:
             padding=(0, 1)
         )
     
-    def _make_loading_panel(self) -> Panel:
-        """Create page loading status panel"""
-        if not self.loading_active:
-            status_text = Text("Ready - Press L to load", style="dim yellow")
-        else:
-            lines = [
-                f"[cyan]Proxy:[/cyan] {self.loading_current_proxy or '...'}",
-                f"[green]✓ {self.loading_success}[/green] [red]✗ {self.loading_failed}[/red]",
-            ]
-            status_text = Text.from_markup("\n".join(lines))
-        
-        return Panel(
-            status_text,
-            title="[bold cyan]🌐 Loader[/bold cyan]",
-            border_style="cyan",
-            padding=(0, 1)
-        )
-    
     def _make_help_panel(self) -> Panel:
         """Create help/shortcuts panel"""
         help_text = Text.from_markup(
-            "[cyan]CONTROLS[/cyan]\n"
-            "[green]↑↓[/green] - Navigate\n"
-            "[blue]↵[/blue] - Select\n"
-            "[yellow]Q[/yellow] - Quit"
+            "[cyan]PLUGIN CONTROLS[/cyan]\n"
+            "[green]↑↓[/green] - Select plugin\n"
+            "[blue]↵[/blue] - Start/Resume\n"
+            "[yellow]Space[/yellow] - Pause\n"
+            "[red]Del/Backspace[/red] - Stop\n"
+            "[magenta]Q[/magenta] - Quit"
         )
         
         return Panel(
@@ -346,189 +392,131 @@ class AdvancedDashboard:
             except Exception as e:
                 self._log("ERROR", f"Auto-save error: {str(e)[:80]}")
     
-    def _load_pages_worker(self):
-        """Background worker for loading pages"""
-        proxies = self.proxy_manager.get_working("ANY")
-        
-        if not proxies:
-            self._log("WARNING", "No working proxies available")
-            self.loading_active = False
-            return
-        
-        self.loading_success = 0
-        self.loading_failed = 0
-        self._log("INFO", f"Starting page load with {len(proxies)} proxies")
-        
-        try:
-            user_agents = self._load_user_agents()
-            cookies = self.config.get("cookies", {})
-            
-            for proxy in proxies:
-                if not self.loading_active:
-                    break
-                
-                self.loading_current_proxy = proxy.address
-                ua = random.choice(user_agents) if user_agents else self.config.get("user_agent", "")
-                success = self._browse_with_proxy(proxy, ua, cookies)
-                
-                if success:
-                    self.loading_success += 1
-                    self._log("SUCCESS", f"Loaded: {proxy.address}")
-                else:
-                    self.loading_failed += 1
-                    self.proxy_manager.mark_failed(proxy.ip, proxy.port)
-                    self._log("ERROR", f"Failed: {proxy.address}")
-                
-                time.sleep(0.3)
-        
-        except Exception as e:
-            self._log("ERROR", f"Loading error: {str(e)[:80]}")
-        finally:
-            self.loading_active = False
-            self.loading_current_proxy = None
-            self._log("INFO", f"Load complete: {self.loading_success}✓ {self.loading_failed}✗")
-    
-    def _browse_with_proxy(self, proxy, ua: str, cookies: dict) -> bool:
-        """Load page via proxy using Playwright"""
-        try:
-            timeout_ms = int(self.config.get("timeout", 10) * 1000)
-            target_url = self.config["url"]
-            
-            with sync_playwright() as pw:
-                browser = pw.chromium.launch(
-                    headless=True,
-                    proxy={"server": f"http://{proxy.address}"}
-                )
-                context = browser.new_context(
-                    user_agent=ua,
-                    ignore_https_errors=not self.config.get("verify_ssl", True)
-                )
-                
-                host = urlparse(target_url).hostname
-                if cookies and host:
-                    context.add_cookies([
-                        {"name": k, "value": str(v), "domain": host, "path": "/"}
-                        for k, v in cookies.items()
-                    ])
-                
-                page = context.new_page()
-                response = page.goto(target_url, wait_until="domcontentloaded", timeout=timeout_ms)
-                
-                success = response and 200 <= response.status < 400
-                context.close()
-                browser.close()
-                
-                return success
-        except (PlaywrightError, PlaywrightTimeout):
-            return False
-        except Exception:
-            return False
-    
-    def _load_user_agents(self) -> List[str]:
-        """Load user agents from file"""
-        try:
-            path = Path("user_agents.txt")
-            if path.exists():
-                agents = [line.strip() for line in path.read_text().splitlines() if line.strip()]
-                return agents if agents else []
-        except Exception:
-            pass
-        return []
-    
     def _input_handler_worker(self):
-        """Background worker to handle keyboard input with arrow key navigation"""
+        """Background worker to handle keyboard input for plugin control"""
         if not HAS_PROMPT_TOOLKIT:
-            self._log("WARNING", "prompt_toolkit not installed, skipping menu")
+            self._log("WARNING", "prompt_toolkit not installed, skipping plugin controls")
             return
-        
+
         try:
-            menu_items = [
-                ("▶ Load Pages", self._handle_load),
-                ("▶ Show Results", self._handle_results),
-                ("▶ Export Metrics", self._handle_export),
-                ("▶ Quit Dashboard", self._handle_quit),
-            ]
-            
-            selected = [0]  # Use list to allow modification in nested function
-            menu_open = [True]  # Track if menu is open
-            
-            def get_menu_text():
-                """Generate menu text with highlight"""
-                lines = ["[bold cyan]━━━ MENU ━━━[/bold cyan]"]
-                for i, (name, _) in enumerate(menu_items):
-                    if i == selected[0]:
-                        lines.append(f"[bold bg='ansicyan' fg='ansiblack'] {name:25} [/bold bg='ansicyan' fg='ansiblack']")
-                    else:
-                        lines.append(f"  {name}")
+            self._log("INFO", "Plugin controls active: ↑↓ select, ↵ start/resume, Space pause, Del stop")
+
+            def get_plugin_text():
+                lines = ["[bold cyan]━━ Plugins ━━[/bold cyan]"]
+                if not self.plugin_names:
+                    lines.append("No plugins discovered")
+                else:
+                    for idx, name in enumerate(self.plugin_names):
+                        plugin = self.plugin_manager.plugins.get(name)
+                        status = plugin.status.value if plugin else "unknown"
+                        prefix = "➤" if idx == self.selected_plugin_index else "  "
+                        lines.append(f"{prefix} {name} [dim]|[/dim] [bold]{status}[/bold]")
                 lines.append("")
-                lines.append("[dim]↑↓ Navigate | ↵ Select[/dim]")
+                lines.append("[dim]↵ start/resume • Space pause • Del stop • Q quit[/dim]")
                 return "\n".join(lines)
-            
-            # Create key bindings
+
             kb = KeyBindings()
-            
+
             @kb.add("up", eager=True)
             def _(event):
-                if menu_open[0]:
-                    selected[0] = (selected[0] - 1) % len(menu_items)
-            
+                if not self.plugin_names:
+                    return
+                self.selected_plugin_index = (self.selected_plugin_index - 1) % len(self.plugin_names)
+                event.app.invalidate()
+
             @kb.add("down", eager=True)
             def _(event):
-                if menu_open[0]:
-                    selected[0] = (selected[0] + 1) % len(menu_items)
-            
+                if not self.plugin_names:
+                    return
+                self.selected_plugin_index = (self.selected_plugin_index + 1) % len(self.plugin_names)
+                event.app.invalidate()
+
             @kb.add("enter", eager=True)
             def _(event):
-                if menu_open[0]:
-                    _, handler = menu_items[selected[0]]
-                    menu_open[0] = False
-                    handler()
-                    menu_open[0] = True
-            
+                self._start_or_resume_selected_plugin()
+                event.app.invalidate()
+
+            @kb.add(" ", eager=True)
+            def _(event):
+                self._pause_selected_plugin()
+                event.app.invalidate()
+
+            @kb.add("delete", eager=True)
+            @kb.add("backspace", eager=True)
+            def _(event):
+                self._stop_selected_plugin()
+                event.app.invalidate()
+
             @kb.add("q", eager=True)
             def _(event):
                 self._handle_quit()
-            
-            # Create application with menu display
+                event.app.exit()
+
             root_container = HSplit([
                 Window(
-                    content=FormattedTextControl(lambda: HTML(get_menu_text())),
-                    height=10
+                    content=FormattedTextControl(lambda: HTML(get_plugin_text())),
+                    height=12
                 )
             ])
-            
+
             app = Application(
                 layout=PTLayout(root_container),
                 key_bindings=kb,
                 enable_page_navigation_bindings=False,
-                mouse_support=False
+                mouse_support=False,
+                refresh_interval=0.25,
             )
-            
-            # Run menu in background
+
+            # Run the prompt_toolkit UI in this background thread; it will exit when Q is pressed
             while self.running:
-                try:
-                    if menu_open[0]:
-                        # Run with a timeout to allow dashboard updates
-                        try:
-                            app.run_async().send(None)
-                        except (StopIteration, StopAsyncIteration):
-                            pass
-                    time.sleep(0.1)
-                except Exception:
-                    time.sleep(0.1)
-        
+                app.run()
+
         except Exception as e:
-            self._log("ERROR", f"Menu error: {str(e)[:50]}")
+            self._log("ERROR", f"Plugin control error: {str(e)[:50]}")
     
-    def _handle_load(self):
-        """Handle load pages action"""
-        if not self.loading_active:
-            self.loading_active = True
-            self.loading_thread = threading.Thread(target=self._load_pages_worker, daemon=True)
-            self.loading_thread.start()
-            self._log("INFO", "Starting page load...")
+    def _selected_plugin_name(self) -> Optional[str]:
+        """Return currently selected plugin name"""
+        if not self.plugin_names:
+            return None
+        self.selected_plugin_index %= len(self.plugin_names)
+        return self.plugin_names[self.selected_plugin_index]
+
+    def _start_or_resume_selected_plugin(self):
+        name = self._selected_plugin_name()
+        if not name:
+            self._log("WARNING", "No plugins available")
+            return
+        plugin = self.plugin_manager.plugins.get(name)
+        if not plugin:
+            self._log("ERROR", f"Plugin {name} not loaded")
+            return
+
+        if plugin.status == PluginStatus.PAUSED:
+            ok = self.plugin_manager.resume_plugin(name)
+            self._log("SUCCESS" if ok else "ERROR", f"Plugin {name} resume {'ok' if ok else 'failed'}")
+        elif plugin.status in (PluginStatus.STOPPED, PluginStatus.IDLE, PluginStatus.ERROR):
+            ok = self.plugin_manager.start_plugin(name)
+            self._log("SUCCESS" if ok else "ERROR", f"Plugin {name} start {'ok' if ok else 'failed'}")
+        elif plugin.status == PluginStatus.RUNNING:
+            self._log("INFO", f"Plugin {name} already running")
+
+    def _pause_selected_plugin(self):
+        name = self._selected_plugin_name()
+        if not name:
+            return
+        plugin = self.plugin_manager.plugins.get(name)
+        if plugin and plugin.status == PluginStatus.RUNNING:
+            ok = self.plugin_manager.pause_plugin(name)
+            self._log("SUCCESS" if ok else "ERROR", f"Plugin {name} pause {'ok' if ok else 'failed'}")
         else:
-            self._log("WARNING", "Page loading already in progress")
+            self._log("WARNING", f"Plugin {name} not running")
+
+    def _stop_selected_plugin(self):
+        name = self._selected_plugin_name()
+        if not name:
+            return
+        ok = self.plugin_manager.stop_plugin(name)
+        self._log("SUCCESS" if ok else "ERROR", f"Plugin {name} stop {'ok' if ok else 'failed'}")
     
     def _handle_results(self):
         """Handle results action"""
@@ -583,13 +571,16 @@ class AdvancedDashboard:
             with Live(layout, refresh_per_second=refresh_rate, screen=True) as live:
                 while self.running:
                     try:
+                        # Refresh plugin list in case plugins changed
+                        self.plugin_names = sorted(self.plugin_manager.plugins.keys())
+
                         # Update all 7 panels
                         layout["header"].update(self._make_header())
                         layout["body"]["left"]["stats"].update(self._make_stats_panel())
                         layout["body"]["left"]["config"].update(self._make_config_panel())
                         layout["body"]["left"]["protocols"].update(self._make_protocol_stats_panel())
+                        layout["body"]["right"]["plugins"].update(self._make_plugins_panel())
                         layout["body"]["right"]["proxies"].update(self._make_proxies_panel())
-                        layout["body"]["right"]["loading"].update(self._make_loading_panel())
                         layout["body"]["right"]["help"].update(self._make_help_panel())
                         layout["log"].update(self._make_log_panel())
                         

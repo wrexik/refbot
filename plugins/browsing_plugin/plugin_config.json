@@ -1,0 +1,20 @@
+{
+  "enabled": true,
+  "name": "Browsing Plugin",
+  "description": "Loads a target page through rotating proxies and user agents",
+  "class": "browsing_plugin.BrowsingPlugin",
+  "version": "1.0.0",
+  "url": "https://rarecloud.io/rewards/?ref=298dToit",
+  "headless": false,
+  "timeout_seconds": 12,
+  "wait_selector": null,
+  "success_keyword": null,
+  "delay_after_load_ms": 500,
+  "proxy_list": [],
+  "proxy_list_file": null,
+  "user_agents_file": "user_agents.txt",
+  "use_stealth": false,
+  "max_retries_per_run": 1,
+  "batch_size": 1,
+  "sleep_between_runs_ms": 5000
+}

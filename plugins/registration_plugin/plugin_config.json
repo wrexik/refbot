@@ -1,0 +1,20 @@
+{
+  "enabled": true,
+  "name": "Registration Plugin",
+  "description": "Automated registration form submission with Playwright",
+  "class": "registration_plugin.RegistrationPlugin",
+  "version": "1.0.0",
+  "url": "https://rarecloud.io/rewards/?ref=298dToit",
+  "first_name_selector": "input[name='firstName']",
+  "email_selector": "input[name='email']",
+  "submit_selector": "button[type='submit']",
+  "accept_cookies_selector": "button.cookie-accept",
+  "headless": false,
+  "batch_size": 1,
+  "delay_between_submissions_ms": 1000,
+  "proxy_url": null,
+  "schedule": {
+    "enabled": false,
+    "cron_expression": "0 * * * *"
+  }
+}
