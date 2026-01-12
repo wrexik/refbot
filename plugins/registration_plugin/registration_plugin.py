@@ -46,6 +46,7 @@ class RegistrationPlugin(BasePlugin):
         self.reg_config = self._load_registration_config()
         self.first_names = self._load_first_names()
         self.domains = ["gmail.com", "yahoo.com", "outlook.com"]
+        self.playwright = None
         self.browser = None
         self.context = None
         self.registered_emails = set()
@@ -61,9 +62,19 @@ class RegistrationPlugin(BasePlugin):
         config.submit_selector = self.config.get("submit_selector", config.submit_selector)
         config.accept_cookies_selector = self.config.get("accept_cookies_selector", config.accept_cookies_selector)
         config.headless = self.config.get("headless", config.headless)
-        config.batch_size = self.config.get("batch_size", config.batch_size)
-        config.delay_between_submissions_ms = self.config.get("delay_between_submissions_ms", config.delay_between_submissions_ms)
+        config.batch_size = max(1, self.config.get("batch_size", config.batch_size))
+        config.delay_between_submissions_ms = max(0, self.config.get("delay_between_submissions_ms", config.delay_between_submissions_ms))
         config.proxy_url = self.config.get("proxy_url", config.proxy_url)
+        
+        # Validate required fields
+        if not config.url:
+            self.logger.error("No URL configured in plugin_config.json")
+        if not config.first_name_selector:
+            self.logger.warning("No first_name_selector configured")
+        if not config.email_selector:
+            self.logger.warning("No email_selector configured")
+        if not config.submit_selector:
+            self.logger.warning("No submit_selector configured")
         
         return config
     
@@ -100,8 +111,28 @@ class RegistrationPlugin(BasePlugin):
         email = f"{first_name.lower()}{timestamp}@{domain}"
         return email
     
-    def _setup_browser(self) -> bool:
-        """Setup Playwright browser"""
+    def _get_random_proxy(self) -> Optional[str]:
+        """Get a random proxy from proxy_manager or config"""
+        # If explicit proxy in config, use that
+        if self.reg_config.proxy_url:
+            return self.reg_config.proxy_url
+        
+        # Try to get random proxy from shared proxy_manager
+        if hasattr(self, "proxy_manager") and self.proxy_manager:
+            try:
+                working = self.proxy_manager.get_working("ANY")
+                if working:
+                    choice = random.choice(working)
+                    proxy_url = f"http://{choice.address}"
+                    self.logger.info(f"Selected random proxy: {proxy_url}")
+                    return proxy_url
+            except Exception as e:
+                self.logger.debug(f"Could not get proxy from manager: {e}")
+        
+        return None
+    
+    def _setup_browser(self, proxy_url: Optional[str] = None) -> bool:
+        """Setup Playwright browser with optional proxy"""
         try:
             if not HAS_PLAYWRIGHT:
                 self.logger.error("Playwright not available")
@@ -110,22 +141,6 @@ class RegistrationPlugin(BasePlugin):
             self.playwright = sync_playwright().start()
             
             browser_args = {}
-            proxy_url = self.reg_config.proxy_url
-
-            # If no explicit proxy, try to pull one from shared proxy_manager (wait briefly)
-            if not proxy_url and hasattr(self, "proxy_manager") and self.proxy_manager:
-                for _ in range(10):  # wait up to ~5s for a working proxy
-                    try:
-                        working = self.proxy_manager.get_working("ANY")
-                        if working:
-                            choice = random.choice(working)
-                            proxy_url = f"http://{choice.address}"
-                            self.logger.info(f"Using shared proxy {proxy_url}")
-                            break
-                    except Exception:
-                        pass
-                    time.sleep(0.5)
-
             if proxy_url:
                 if proxy_url.startswith("http"):
                     proxy_host = proxy_url.split("://", 1)[1]
@@ -133,6 +148,7 @@ class RegistrationPlugin(BasePlugin):
                     proxy_host = proxy_url
                     proxy_url = f"http://{proxy_url}"
                 browser_args["proxy"] = {"server": proxy_url}
+                self.logger.info(f"Using proxy: {proxy_url}")
             
             self.browser = self.playwright.chromium.launch(
                 headless=self.reg_config.headless,
@@ -148,16 +164,27 @@ class RegistrationPlugin(BasePlugin):
             return False
     
     def _teardown_browser(self) -> None:
-        """Close browser"""
+        """Close browser and cleanup Playwright"""
         try:
-            if self.context:
+            if hasattr(self, 'context') and self.context:
                 self.context.close()
-            if self.browser:
+                self.context = None
+        except Exception as e:
+            self.logger.debug(f"Error closing context: {e}")
+        
+        try:
+            if hasattr(self, 'browser') and self.browser:
                 self.browser.close()
-            if self.playwright:
-                self.playwright.stop()
+                self.browser = None
         except Exception as e:
             self.logger.debug(f"Error closing browser: {e}")
+        
+        try:
+            if hasattr(self, 'playwright') and self.playwright:
+                self.playwright.stop()
+                self.playwright = None
+        except Exception as e:
+            self.logger.debug(f"Error stopping playwright: {e}")
     
     def _accept_cookies(self, page: Page) -> bool:
         """Accept cookies if selector provided"""
@@ -227,9 +254,13 @@ class RegistrationPlugin(BasePlugin):
         }
         
         try:
-            if not self.context:
-                if not self._setup_browser():
-                    raise Exception("Browser setup failed")
+            # Get a random proxy for this batch
+            proxy_url = self._get_random_proxy()
+            
+            # Always teardown and setup new browser to use different proxy each run
+            self._teardown_browser()
+            if not self._setup_browser(proxy_url):
+                raise Exception("Browser setup failed")
             
             for i in range(self.reg_config.batch_size):
                 if self.status != PluginStatus.RUNNING:
@@ -265,7 +296,12 @@ class RegistrationPlugin(BasePlugin):
     def execute(self) -> Dict[str, Any]:
         """Execute registration"""
         if not HAS_PLAYWRIGHT:
-            return {"error": "Playwright not installed"}
+            self.logger.error("Playwright not installed")
+            return {"error": "Playwright not installed", "response_time_ms": 0, "submitted": 0, "successful": 0, "failed": 1}
+        
+        if not self.reg_config.url:
+            self.logger.error("No URL configured")
+            return {"error": "No URL configured", "response_time_ms": 0, "submitted": 0, "successful": 0, "failed": 1}
         
         start_time = time.time()
         
@@ -283,7 +319,8 @@ class RegistrationPlugin(BasePlugin):
         
         except Exception as e:
             self.logger.error(f"Execution failed: {e}")
-            return {"error": str(e)}
+            response_time = (time.time() - start_time) * 1000
+            return {"error": str(e), "response_time_ms": response_time, "submitted": 0, "successful": 0, "failed": 1}
     
     def stop(self) -> bool:
         """Stop plugin and cleanup"""

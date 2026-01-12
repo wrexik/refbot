@@ -48,22 +48,30 @@ class BrowsingPlugin(BasePlugin):
         self.proxy_index = 0
         self.total_success = 0
         self.total_fail = 0
+        
+        if not HAS_PLAYWRIGHT:
+            self.logger.error("Playwright not installed. Install with: pip install playwright")
 
     def _load_browsing_config(self) -> BrowsingConfig:
         cfg = BrowsingConfig()
         cfg.url = self.config.get("url", cfg.url)
         cfg.headless = self.config.get("headless", cfg.headless)
-        cfg.timeout_seconds = int(self.config.get("timeout_seconds", cfg.timeout_seconds))
+        cfg.timeout_seconds = max(1, int(self.config.get("timeout_seconds", cfg.timeout_seconds)))
         cfg.wait_selector = self.config.get("wait_selector", cfg.wait_selector)
         cfg.success_keyword = self.config.get("success_keyword", cfg.success_keyword)
-        cfg.delay_after_load_ms = int(self.config.get("delay_after_load_ms", cfg.delay_after_load_ms))
+        cfg.delay_after_load_ms = max(0, int(self.config.get("delay_after_load_ms", cfg.delay_after_load_ms)))
         cfg.proxy_list = self.config.get("proxy_list", []) or []
         cfg.proxy_list_file = self.config.get("proxy_list_file", None)
         cfg.user_agents_file = self.config.get("user_agents_file", cfg.user_agents_file)
         cfg.use_stealth = bool(self.config.get("use_stealth", cfg.use_stealth))
-        cfg.max_retries_per_run = int(self.config.get("max_retries_per_run", cfg.max_retries_per_run))
-        cfg.batch_size = int(self.config.get("batch_size", cfg.batch_size))
-        cfg.sleep_between_runs_ms = int(self.config.get("sleep_between_runs_ms", cfg.sleep_between_runs_ms))
+        cfg.max_retries_per_run = max(1, int(self.config.get("max_retries_per_run", cfg.max_retries_per_run)))
+        cfg.batch_size = max(1, int(self.config.get("batch_size", cfg.batch_size)))
+        cfg.sleep_between_runs_ms = max(0, int(self.config.get("sleep_between_runs_ms", cfg.sleep_between_runs_ms)))
+        
+        # Validate required fields
+        if not cfg.url:
+            self.logger.error("No URL configured in plugin_config.json")
+        
         return cfg
 
     def _load_user_agents(self) -> List[str]:
@@ -78,22 +86,26 @@ class BrowsingPlugin(BasePlugin):
         return proxies
 
     def _next_proxy(self) -> Optional[str]:
-        # Prefer shared proxy_manager if injected by dashboard
+        # Prefer shared proxy_manager if injected by dashboard (random selection)
         if hasattr(self, "proxy_manager") and self.proxy_manager:
-            for _ in range(10):  # wait up to ~5s for a working proxy
-                try:
-                    working = self.proxy_manager.get_working("ANY")
-                    if working:
-                        choice = random.choice(working)
-                        return f"http://{choice.address}"
-                except Exception:
-                    pass
-                time.sleep(0.5)
+            try:
+                working = self.proxy_manager.get_working("ANY")
+                if working:
+                    # Randomly select a proxy instead of round-robin
+                    choice = random.choice(working)
+                    proxy_url = f"http://{choice.address}"
+                    self.logger.info(f"Selected random proxy: {proxy_url}")
+                    return proxy_url
+            except Exception as e:
+                self.logger.debug(f"Could not get proxy from manager: {e}")
 
+        # Fallback to configured proxy list (also use random instead of round-robin)
         if not self.proxies:
             return None
-        proxy = self.proxies[self.proxy_index % len(self.proxies)]
-        self.proxy_index += 1
+        
+        # Use random selection instead of sequential
+        proxy = random.choice(self.proxies)
+        
         # Normalize to include scheme for Playwright
         if not proxy.startswith("http"):
             proxy = f"http://{proxy}"
@@ -149,6 +161,14 @@ class BrowsingPlugin(BasePlugin):
                 browser.close()
 
     def execute(self) -> Dict[str, Any]:
+        if not HAS_PLAYWRIGHT:
+            self.logger.error("Playwright not installed")
+            return {"error": "playwright not installed", "status": "error", "response_time_ms": 0}
+        
+        if not self.bconf.url:
+            self.logger.error("No URL configured")
+            return {"error": "No URL configured", "status": "error", "response_time_ms": 0}
+        
         proxy = self._next_proxy()
         attempts = 0
         max_attempts = max(1, self.bconf.max_retries_per_run)
@@ -170,3 +190,17 @@ class BrowsingPlugin(BasePlugin):
         if self.bconf.sleep_between_runs_ms:
             time.sleep(self.bconf.sleep_between_runs_ms / 1000)
         return last_result
+    
+    def stop(self) -> bool:
+        """Stop plugin execution"""
+        result = super().stop()
+        return result
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get plugin status with browsing stats"""
+        status = super().get_status()
+        status["total_success"] = self.total_success
+        status["total_fail"] = self.total_fail
+        status["target_url"] = self.bconf.url
+        status["headless"] = self.bconf.headless
+        return status

@@ -1,93 +1,208 @@
-# RefBot - Advanced Proxy Manager
+# RefBot
 
-A sophisticated Python proxy management system with concurrent validation, persistence, and integrated page loading via a professional Rich terminal dashboard.
+**Enterprise-grade proxy management system with plugin architecture, automated validation, and real-time monitoring.**
 
-## 🚀 Quick Start
+RefBot is a production-ready Python application designed for high-performance proxy scraping, validation, and utilization. It features a modular plugin system, REST API, CLI interface, and an interactive terminal dashboard powered by Rich.
+
+## Quick Start
 
 ```bash
 # Install dependencies
 pip install -r requirements.txt
 
-# Run everything (single command entry point)
-python dashboard.py
+# Install Playwright browsers (for automation plugins)
+playwright install chromium
+
+# Run the dashboard
+python main.py
 ```
 
-That's it! The dashboard automatically:
-- 🔄 Scrapes proxies from 38+ sources
-- ✅ Validates HTTP and HTTPS concurrently (200 workers each)
-- 📊 Displays 7 live information panels
-- 💾 Saves state automatically every 10 seconds
-- 🌐 Loads pages through validated proxies
+The system will automatically:
+- Scrape proxies from multiple sources
+- Validate proxies concurrently (HTTP/HTTPS)
+- Display real-time metrics and status
+- Persist state and metrics to disk
+- Enable plugin-based automation tasks
 
-## ✨ Features
+## Features
 
-| Feature | Details |
-|---------|---------|
-| **Concurrent Scraping** | 38 proxy sources, generator-based streaming |
-| **Dual Protocol Validation** | 200 HTTP + 200 HTTPS workers, <2s response times |
-| **7-Panel Dashboard** | Header, Stats, Config, Protocols, Proxies, Loading, Help |
-| **State Persistence** | Auto-save to JSON every 10s + CSV metrics |
-| **Page Loading** | Integrated Playwright browser automation |
-| **Thread-Safe** | RLock protection for all proxy operations |
-| **Live Refresh** | 1Hz dashboard updates with color-coded logs |
+### Core Capabilities
+- **Multi-Source Scraping**: Aggregate proxies from 38+ public sources
+- **Concurrent Validation**: 200 HTTP + 200 HTTPS workers with sub-2s response times
+- **Plugin Architecture**: Extensible system for custom automation workflows
+- **REST API**: Full remote control and monitoring via FastAPI
+- **CLI Interface**: Complete command-line management with Click
+- **Rich Dashboard**: Interactive 7-panel terminal UI with live updates
+- **State Persistence**: Automatic JSON and CSV exports every 10 seconds
+- **Thread-Safe Design**: RLock protection for concurrent operations
+- **Advanced Scheduling**: Cron-based job scheduling with retry logic
+- **Metrics & Analytics**: Real-time aggregation with alerting and anomaly detection
+- **Intelligent Scoring**: Weighted proxy ranking with circuit breaker health monitoring
 
-## 🏗️ Architecture
+### Plugin System
+- **Base Plugin Framework**: Abstract class for creating custom plugins
+- **Plugin Manager**: Auto-discovery, lifecycle management, and orchestration
+- **Registration Plugin**: Automated form submission with Playwright browser automation
+- **Browsing Plugin**: Proxy-aware web browsing and interaction
 
-### Three Concurrent Workers
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│ Dashboard (Main UI Thread)                          │
-├─────────────────────────────────────────────────────┤
-│  Worker 1: Scraper      (5-min interval)            │
-│  Worker 2: HTTP Validator (200 concurrent)          │
-│  Worker 3: HTTPS Validator (200 concurrent)         │
-│  Worker 4: Auto-save Loop (10-sec interval)         │
-│  Worker 5: Page Loader (on-demand via UI)           │
-└─────────────────────────────────────────────────────┘
-                      ↓
-           ┌──────────────────────┐
-           │ ProxyManager         │
-           │ (Thread-Safe RLock)  │
-           └──────────────────────┘
-                      ↓
-           ┌──────────────────────┐
-           │ Persistence          │
-           │ (JSON + CSV)         │
-           └──────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                     Main Application                         │
+│                      (main.py)                               │
+├─────────────────────────────────────────────────────────────┤
+│  Dashboard UI          │  REST API        │  CLI Commands   │
+│  (dashboard.py)        │  (api/rest_api)  │  (cli/)         │
+├────────────────────────┴──────────────────┴─────────────────┤
+│                     Plugin Manager                           │
+│                  (plugins/plugin_manager.py)                 │
+├─────────────────────────────────────────────────────────────┤
+│  Core Services:                                              │
+│  • ProxyManager (thread-safe proxy storage)                  │
+│  • WorkerThreads (scraper + validators + auto-save)          │
+│  • Scheduler (job scheduling with APScheduler)               │
+│  • Analytics (metrics aggregation + alerting)                │
+│  • ProxyScorer (intelligent ranking + circuit breaker)       │
+│  • Persistence (JSON + CSV state management)                 │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### Core Modules
+## Project Structure
 
-| Module | Purpose | Key Classes |
-|--------|---------|------------|
-| **proxy_manager.py** | Thread-safe proxy storage | `ProxyManager`, `Proxy` dataclass |
-| **worker_threads.py** | Concurrent workers | `WorkerThreads` with 3+ threads |
-| **persistence.py** | JSON state + CSV metrics | `PersistenceManager`, `MetricsExporter` |
-| **scraper.py** | 38-source proxy fetching | `fetch_proxies_stream()` generator |
-| **checker.py** | HTTP/HTTPS validation | `validate_http_proxy()`, `validate_https_proxy()` |
-| **dashboard.py** | Rich terminal UI | `AdvancedDashboard` with 7 panels |
-| **main.py** | External API | `get_proxies()`, `get_stats()`, etc. |
+```
+refbot/
+├── main.py                    # Main entry point
+├── dashboard.py               # Rich terminal UI
+├── config.json                # Configuration
+├── proxy_manager.py           # Thread-safe proxy storage
+├── worker_threads.py          # Concurrent workers
+├── persistence.py             # State persistence
+├── scraper.py                 # Multi-source proxy scraper
+├── checker.py                 # HTTP/HTTPS validation
+│
+├── core/                      # Core subsystems
+│   ├── scheduler.py           # Job scheduling with APScheduler
+│   ├── analytics.py           # Metrics aggregation + alerting
+│   └── proxy_scoring.py       # Intelligent proxy ranking
+│
+├── api/                       # REST API
+│   └── rest_api.py            # FastAPI server
+│
+├── cli/                       # Command-line interface
+│   └── cli_commands.py        # Click-based commands
+│
+├── plugins/                   # Plugin system
+│   ├── base_plugin.py         # Abstract base class
+│   ├── plugin_manager.py      # Plugin lifecycle management
+│   ├── registration_plugin/   # Form automation plugin
+│   └── browsing_plugin/       # Web browsing plugin
+│
+└── requirements.txt           # Python dependencies
+```
 
-## 📊 Dashboard Overview
+## Usage
+
+### Dashboard Interface
+
+Run the interactive dashboard:
+
+```bash
+python main.py
+```
 
 The dashboard displays 7 information panels:
 
-1. **Header Panel**: Current time, uptime counter, operational mode
-2. **Stats**: 8 metrics (scraped, validated, HTTP, HTTPS, working, testing, failed, avg speed)
-3. **Config**: 7 active configuration values
-4. **Protocols**: HTTP/HTTPS/BOTH distribution with progress bars
-5. **Top Proxies**: 8 fastest working proxies with response times
-6. **Loading Status**: Page loader state and success/failure counts
-7. **Help**: Keyboard shortcuts (L=Load, R=Results, E=Export, Q=Quit)
-8. **Event Log**: 20 color-coded activity lines
+1. **Header**: Current time, uptime, operational mode
+2. **Statistics**: Proxy counts (scraped, validated, working, failed)
+3. **Configuration**: Active settings and parameters
+4. **Protocol Distribution**: HTTP/HTTPS/BOTH support breakdown
+5. **Top Proxies**: Fastest working proxies with response times
+6. **Loading Status**: Page loader state and metrics
+7. **Event Log**: Color-coded activity stream
 
-## ⚙️ Configuration
+### Python API
 
-Edit `config.json`:
+Use RefBot programmatically in your applications:
+
+```python
+from main import get_proxies, get_stats, export_proxies
+
+# Get working HTTPS proxies
+proxies = get_proxies("HTTPS")  # Options: "HTTP", "HTTPS", "ANY"
+for proxy in proxies[:5]:
+    print(f"{proxy.ip}:{proxy.port} - {proxy.response_time:.2f}s")
+
+# Get system statistics
+stats = get_stats()
+print(f"Working: {stats['working_count']}")
+print(f"Average Speed: {stats['average_speed']:.2f}s")
+
+# Export proxies to file
+count = export_proxies("working_proxies.txt")
+print(f"Exported {count} proxies")
+```
+
+### REST API
+
+Start the API server:
+
+```bash
+python -m cli.cli_commands api start --port 8000
+```
+
+Available endpoints:
+
+- `GET /api/health` - System health status
+- `GET /api/plugins` - List all plugins
+- `POST /api/plugins/{name}/start` - Start a plugin
+- `POST /api/plugins/{name}/stop` - Stop a plugin
+- `GET /api/metrics` - Get current metrics
+- `GET /api/proxies` - List proxies by score
+- `GET /docs` - Interactive Swagger documentation
+
+Example usage:
+
+```bash
+# Get health status
+curl http://localhost:8000/api/health
+
+# Start a plugin
+curl -X POST http://localhost:8000/api/plugins/registration_plugin/start
+
+# Export metrics
+curl "http://localhost:8000/api/metrics/export?format=csv" > metrics.csv
+```
+
+### CLI Commands
+
+Complete command-line interface:
+
+```bash
+# Plugin management
+python -m cli.cli_commands plugin list
+python -m cli.cli_commands plugin start registration_plugin
+python -m cli.cli_commands plugin stop registration_plugin
+python -m cli.cli_commands plugin status
+
+# Metrics
+python -m cli.cli_commands metrics show --hours 24
+python -m cli.cli_commands metrics export --format csv
+
+# Proxy management
+python -m cli.cli_commands proxies score --top 10
+python -m cli.cli_commands proxies health
+
+# Configuration
+python -m cli.cli_commands config validate
+```
+## Configuration
+
+Edit `config.json` to customize system behavior:
 
 ```json
 {
+  "mode": "dashboard",
   "url": "https://httpbin.org/ip",
   "timeout": 8,
   "retries": 3,
@@ -99,191 +214,221 @@ Edit `config.json`:
   "save_state_interval_seconds": 10,
   "proxy_revalidate_hours": 1,
   "dashboard_refresh_rate": 1,
-  "cookies": {
-    "cookie_consent": "accepted"
+  "plugins_dir": "plugins",
+  "metrics_file": "metrics.csv",
+  "api": {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "enable": true
   }
 }
 ```
 
-**Key Settings:**
-- `scraper_interval_minutes`: How often to re-scrape all sources (default 20min)
-- `http_workers` / `https_workers`: Concurrent validators per protocol (default 200 each)
-- `save_state_interval_seconds`: How often to persist state to JSON (default 10s)
-- `log_buffer_lines`: Lines to keep in event log (default 20)
-- `dashboard_refresh_rate`: UI update frequency in Hz (default 1/second)
+### Configuration Parameters
 
-## 🔧 Usage
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `mode` | Operating mode (dashboard/api/cli) | `"dashboard"` |
+| `url` | Target URL for proxy validation | `"https://httpbin.org/ip"` |
+| `timeout` | Request timeout in seconds | `8` |
+| `scraper_interval_minutes` | Interval between scraping cycles | `20` |
+| `http_workers` | Concurrent HTTP validation workers | `200` |
+| `https_workers` | Concurrent HTTPS validation workers | `200` |
+| `save_state_interval_seconds` | State persistence interval | `10` |
+| `dashboard_refresh_rate` | UI update frequency (Hz) | `1` |
+| `plugins_dir` | Plugin directory path | `"plugins"` |
 
-### Main Entry Point (Recommended)
+## Plugin Development
 
-```bash
-python dashboard.py
+### Creating a Custom Plugin
+
+1. Create a plugin directory under `plugins/`:
+
+```
+plugins/
+└── my_plugin/
+    ├── __init__.py
+    ├── plugin_config.json
+    └── my_plugin.py
 ```
 
-This is your single command for everything. The dashboard:
-- Auto-starts scraping from 38 sources
-- Validates proxies continuously
-- Updates UI every 1 second
-- Shows all metrics and logs
-- Allows page loading via keyboard (L key)
-- Auto-saves state every 10 seconds
+2. Define plugin configuration (`plugin_config.json`):
 
-### External API Usage
-
-```python
-from main import get_proxies, get_stats, get_top_proxies, export_proxies
-
-# Get working proxies (filters by protocol)
-https_proxies = get_proxies("HTTPS")  # "HTTP", "HTTPS", or "ANY"
-for proxy in https_proxies:
-    print(f"{proxy.ip}:{proxy.port}")
-
-# Get current statistics
-stats = get_stats()
-print(f"Working: {stats['working_count']}")
-print(f"Testing: {stats['testing_count']}")
-
-# Get top 10 fastest proxies
-fast_proxies = get_top_proxies(10)
-for proxy in fast_proxies:
-    print(f"{proxy.address} - {proxy.response_time:.2f}s")
-
-# Export to file
-count = export_proxies("my_proxies.txt")
-print(f"Exported {count} proxies")
+```json
+{
+  "enabled": true,
+  "name": "My Custom Plugin",
+  "description": "Custom automation plugin",
+  "class": "my_plugin.MyPlugin",
+  "version": "1.0.0",
+  "schedule": {
+    "type": "cron",
+    "expression": "*/5 * * * *"
+  }
+}
 ```
 
-### Python Integration
+3. Implement the plugin class (`my_plugin.py`):
 
 ```python
-from proxy_manager import ProxyManager
-import requests
+from plugins.base_plugin import BasePlugin
 
-manager = ProxyManager()
-proxies = manager.get_working("HTTPS")
-
-if proxies:
-    proxy = proxies[0]
-    proxy_addr = f"http://{proxy.ip}:{proxy.port}"
+class MyPlugin(BasePlugin):
+    def __init__(self, config: dict):
+        super().__init__(config)
     
-    response = requests.get(
-        "https://httpbin.org/ip",
-        proxies={"https": proxy_addr},
-        timeout=5
-    )
-    print(response.json())
+    def execute(self):
+        """Main plugin logic"""
+        self.logger.info("Executing custom plugin")
+        
+        # Get working proxies
+        proxies = self.proxy_manager.get_working("HTTPS")
+        
+        # Your automation logic here
+        for proxy in proxies[:5]:
+            # Do something with each proxy
+            pass
+        
+        # Track metrics
+        self.increment_metric("tasks_completed", 1)
 ```
 
-## 📈 Performance Metrics
+4. Load and run the plugin:
+
+```python
+from plugins.plugin_manager import PluginManager
+
+pm = PluginManager("plugins")
+pm.load_all_plugins()
+pm.start_plugin("my_plugin")
+```
+## Performance
 
 | Metric | Value | Notes |
 |--------|-------|-------|
-| **Scraping Speed** | 5-10 proxies/sec | 38 concurrent sources |
-| **Validation Rate** | 50-100 proxies/sec | 400 concurrent workers |
-| **Memory Usage** | 2-5 MB | Per 100 working proxies |
-| **CPU Usage** | <10% idle | <30% under full load |
-| **Dashboard Refresh** | 1 Hz | 1 second per update |
-| **State Persistence** | 10 sec interval | Auto-saves JSON |
-| **Response Time** | <2 seconds | Typical proxy validation |
+| Scraping Speed | 5-10 proxies/sec | Concurrent fetching from 38 sources |
+| Validation Rate | 50-100 proxies/sec | 400 concurrent workers (200 HTTP + 200 HTTPS) |
+| Memory Usage | 2-5 MB | Per 100 working proxies |
+| CPU Usage | <10% idle, <30% load | Efficient thread pooling |
+| Dashboard Refresh | 1 Hz | Configurable update rate |
+| State Persistence | 10 sec interval | Automatic JSON/CSV export |
+| Response Time | <2 sec | Typical proxy validation time |
 
-## 📁 File Structure
+## Installation
 
-```
-refbot/
-├── dashboard.py           # ⭐ Main entry point - Rich UI (7 panels)
-├── proxy_manager.py       # Thread-safe proxy database
-├── worker_threads.py      # Scraper + 2 validators + save loop
-├── persistence.py         # JSON + CSV state management
-├── scraper.py             # 38-source proxy fetching
-├── checker.py             # HTTP/HTTPS validation
-├── main.py                # External API utilities
-│
-├── config.json            # Configuration (editable)
-├── working_proxies.json   # Persistent proxy state
-├── dashboard_state.json   # Dashboard state backup
-├── user_agents.txt        # User agents list
-├── metrics.csv            # Validation metrics
-│
-├── requirements.txt       # Python 3.13+ dependencies
-├── README.md              # This file
-├── QUICKSTART.md          # Quick reference
-└── CHANGELOG.md           # Version history
-```
+### Prerequisites
 
-## 🚀 Getting Started
+- Python 3.8 or higher
+- pip (Python package manager)
+- Internet connection for proxy scraping
 
-### 1. Install
+### Setup
+
+1. **Clone or download the repository**:
 
 ```bash
-# Clone or download
+git clone https://github.com/yourusername/refbot.git
 cd refbot
+```
 
-# Create virtual environment (optional but recommended)
+2. **Create a virtual environment** (recommended):
+
+```bash
+# Windows
 python -m venv .venv
-.venv\Scripts\activate  # Windows
-# or
-source .venv/bin/activate  # Linux/Mac
+.venv\Scripts\activate
 
-# Install dependencies
+# Linux/Mac
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+3. **Install dependencies**:
+
+```bash
 pip install -r requirements.txt
 ```
 
-### 2. Configure
-
-Edit `config.json`:
-- Set target URL for page loading
-- Adjust worker counts if needed
-- Set timeouts based on your network
-
-### 3. Run
+4. **Install Playwright browsers** (for automation plugins):
 
 ```bash
-python dashboard.py
+playwright install chromium
 ```
 
-### 4. Monitor
+5. **Configure the system**:
 
-Watch the dashboard:
-- Stats panel shows validation progress
-- Logs show what's happening in real-time
-- Top Proxies panel updates as new fast proxies are found
-- After ~5 minutes, you'll have 50+ working proxies
+Edit `config.json` to match your requirements (optional).
 
-### 5. Use Proxies
+6. **Run RefBot**:
 
-```python
-from main import get_proxies
-proxies = get_proxies("HTTPS")
-# Use in requests, Selenium, or wherever needed
+```bash
+python main.py
 ```
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
-| No proxies found | Wait 5+ minutes for first scrape, check internet |
-| Validation too slow | Reduce worker count in config, increase timeout |
-| Dashboard text overlaps | Make terminal wider (100+ columns) |
-| Memory usage high | Reduce `log_buffer_lines` in config |
-| Slow page loading | Increase proxy count with longer timeout |
+| No proxies found | Wait 5+ minutes for first scrape cycle to complete |
+| Validation too slow | Reduce worker counts in config or increase timeout |
+| Dashboard text overlaps | Increase terminal width (minimum 100 columns recommended) |
+| High memory usage | Reduce `log_buffer_lines` in configuration |
+| Page loading fails | Ensure Playwright is installed: `playwright install chromium` |
+| Plugin errors | Check plugin_config.json syntax and required dependencies |
+| API not responding | Verify API is enabled in config and port is not in use |
 
-## 📦 Dependencies
+## Dependencies
+
+Core dependencies:
 
 ```
-requests>=2.31.0          # HTTP requests
+requests>=2.31.0          # HTTP client
 rich>=13.0.0              # Terminal UI
 playwright>=1.40.0        # Browser automation
 urllib3>=2.0.0            # HTTP utilities
+apscheduler>=3.10.0       # Job scheduling
+fastapi>=0.104.0          # REST API framework
+uvicorn>=0.24.0           # ASGI server
+click>=8.1.0              # CLI framework
+tabulate>=0.9.0           # Table formatting
+colorama>=0.4.6           # Terminal colors
+pydantic>=2.5.0           # Data validation
 ```
 
-## 📝 License
+See `requirements.txt` for complete dependency list.
 
-MIT - Use freely in your projects
+## License
 
-## 🎯 Next Steps
+MIT License - See LICENSE file for details.
 
-1. Run `python dashboard.py` to start
-2. Wait for proxies to be validated
-3. Export working proxies with E key
-4. Use them in your applications
-5. Check `main.py` for API examples
+## Contributing
+
+Contributions are welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
+
+## Support
+
+For issues, questions, or suggestions:
+- Open an issue on GitHub
+- Check existing documentation in the `docs/` directory
+- Review the ARCHITECTURE.md for technical details
+
+## Roadmap
+
+- [ ] Docker containerization
+- [ ] Web-based UI alternative to terminal dashboard
+- [ ] Additional proxy sources
+- [ ] Machine learning-based proxy quality prediction
+- [ ] Distributed proxy validation across multiple nodes
+- [ ] Enhanced authentication support
+- [ ] Proxy rotation strategies
+- [ ] Integration with popular web scraping frameworks
+
+---
+
+**RefBot** - Professional proxy management made simple.
