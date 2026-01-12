@@ -11,5 +11,5 @@
   "log_buffer_lines": 8,
   "save_state_interval_seconds": 10,
   "proxy_revalidate_hours": 1,
-  "dashboard_refresh_rate": 1
+  "dashboard_refresh_rate": 2
 }
